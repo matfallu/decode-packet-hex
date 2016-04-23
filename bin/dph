@@ -1,0 +1,954 @@
+#!/usr/bin/perl 
+
+use diagnostics;
+use cmn;
+use CGI;
+use CGI::Carp 'fatalsToBrowser';
+use Text::Banner;
+use Getopt::Mixed;
+use Config::Simple;
+use strict;
+use warnings;
+
+#
+# debug
+#
+my $dph_debug                   = 1;
+my $dph_log_to_file             = 1;
+my $debug_packet_hex_processing = 0;
+my $debug_log_raw_file          = 0;
+my $debug_log_text2pcap_file    = 0;
+
+
+=for comment
+#
+# Uncomment this BEGIN block to debug following 'Internal Server Error' -
+# malformed header from script <> : Bad header <> 
+#
+BEGIN {
+       print "Content-type: text/html\n\n";
+}
+=cut
+
+my $cfg = new Config::Simple('../cfg/dph.cfg');
+my $web_server    = $cfg->param('Webserver');
+my $dph_dat_dir   = $cfg->param('Dat-directory');
+my $dph_data_dir  = $cfg->param('Data-directory');
+my $dph_bin_dir   = $cfg->param('Bin-directory');
+
+
+my $text2pcap_binary = "/usr/bin/text2pcap";
+my $tshark_binary    = "/usr/bin/tshark";
+my $tshark_preferences ="-o ip.check_checksum:TRUE -o udp.check_checksum:TRUE -o tcp.check_checksum:TRUE";
+
+my $is_cgi = defined $ENV{'GATEWAY_INTERFACE'};
+my $cgi = CGI->new();
+
+=for comment
+=cut
+
+my $web_server_doc_root  = "$web_server/tt/dph-data";
+my $dph_out_dir          = "out";
+
+
+my $dph_counter_file     = "$dph_data_dir/dph.counter";
+my $dph_log_file         = "$dph_data_dir/dph.log";
+
+
+#
+# Input variables
+#
+my $hextype; # "ethernet" or "ipv4" or "ipv6"
+my $input_text = "empty";
+
+#
+# Global variables
+#
+my $parcels_total       = 0;
+my $parcels_rcvd        = 0;
+my $parcels_sent        = 0;
+my $dph_user_pkt_main_html_url;
+my $dph_user_dph_dir_url;
+
+if ($is_cgi) {
+    # running as CGI
+    $hextype             = $cgi->param( "hextype" );
+    $input_text          = $cgi->param( "text" );
+} else { 
+    Getopt::Mixed::init( 'h:s help>h');
+
+    while( my( $option, $value, $pretty ) = Getopt::Mixed::nextOption()) {
+        OPTION: {
+          $option eq 'h' and do { dph_usage(); exit 0; };
+          # ...
+        }
+    }
+
+    $hextype             = "ipv4";
+    $input_text          = "45 00 00 20 00 00 00 00 ff 11 60 bd c8 05 65 02 c8 05 66 02 13 56 13 56 00 0c b6 40 54 65 73 74";
+
+    #
+    #  Internet Protocol, Src: 200.5.101.2 (200.5.101.2), Dst: 200.5.102.2 (200.5.102.2)
+    #
+    #      Version: 4
+    #      Header length: 20 bytes
+    #      Differentiated Services Field: 0x00 (DSCP 0x00: Default; ECN: 0x00)
+    #      Total Length: 32
+    #      Identification: 0x0000 (0)
+    #      Flags: 0x00
+    #      Fragment offset: 0
+    #      Time to live: 255
+    #      Protocol: UDP (0x11)
+    #      Header checksum: 0x60bd [correct]
+    #      Source: 200.5.101.2 (200.5.101.2)
+    #      Destination: 200.5.102.2 (200.5.102.2)
+    #
+    #  User Datagram Protocol, Src Port: sybasesrvmon (4950), Dst Port: sybasesrvmon (4950)
+    #
+    #      Source port: sybasesrvmon (4950)
+    #      Destination port: sybasesrvmon (4950)
+    #      Length: 12
+    #      Checksum: 0xb640 [correct]
+    #
+    #  Data (4 bytes)
+    #  0000 54 65 73 74 Test
+    #
+
+    $ENV{REMOTE_ADDR}    = '127.0.0.1'; # To avoid warnings
+    $ENV{REMOTE_PORT}    = '1024';      # To avoid warnings
+    $ENV{REMOTE_USER}    = 'matfallu';   # To avoid warnings
+}
+
+
+$text2pcap_binary = "/usr/bin/text2pcap";
+$tshark_binary    = "/usr/bin/tshark";
+
+my $script_start_timestamp = localtime(time);
+
+
+my $sendmail_with_att = "$dph_bin_dir/stable/sendmail_with_att";
+
+#
+# The Index  
+#
+my $id = dph_get_next_id();
+
+#
+# File names 
+#
+my $pkt_main_html        = "$id.main.html";
+my $pkt_mail             = "dph$id.mail.txt";
+my $pkt_mail2user        = "dph$id.mail2user.txt";
+my $pkt_log              = "dph$id.log.txt";   # .txt extn is needed for browser display
+my $pkt_input            = "dph$id.input.txt";
+my $pkt_processed0       = "dph$id.processed0.txt";
+my $pkt_processed1       = "dph$id.processed1.txt";
+my $pkt_processed2       = "dph$id.processed2.txt";
+my $pkt_hex              = "dph$id.hex.txt";
+my $pkt_pcap             = "dph$id.pcap";
+my $pkt_html             = "dph$id.html";
+my $pkt_pdml             = "dph$id.pdml";
+my $pkt_hex_ascii        = "dph$id.hex_ascii.txt";
+my $pkt_text             = "dph$id.text.txt";
+my $pkt_ttrace           = "dph$id.ttrace.txt";
+my $pkt_status           = "dph$id.status.txt";
+my $pkt_error            = "dph$id.error.html";
+
+# Following file names must match with values in
+# file wireshark-1.10.2/plugins/jnpr/packet-jnpr.c 
+my $pkt_stream_encap     = "dph$id.stream_encap.txt";
+my $pkt_stream_port_ifd  = "dph$id.stream_port_ifd.txt";
+my $pkt_ifds             = "dph$id.ifds.txt";
+my $pkt_ifls             = "dph$id.ifls.txt";
+my $pkt_wshark_log       = "dph$id.wshark_log.txt";
+my $pkt_tshark_data      = "dph$id.tshark_data.txt";
+my $pkt_parcels_directions = "dph$id.parcels_directions.txt";
+
+
+my $dph_space = "$dph_data_dir/$dph_out_dir/$id";
+#
+# Full file name 
+#
+my $pkt_main_html_file   = "$dph_space/$pkt_main_html";
+my $pkt_mail_file        = "$dph_space/$pkt_mail";
+my $pkt_mail2user_file   = "$dph_space/$pkt_mail2user";
+my $pkt_log_file         = "$dph_space/$pkt_log";
+my $pkt_input_file       = "$dph_space/$pkt_input";
+my $pkt_hex_file         = "$dph_space/$pkt_hex";
+my $pkt_html_file        = "$dph_space/$pkt_html";
+my $pkt_pcap_file        = "$dph_space/$pkt_pcap";
+my $pkt_pdml_file        = "$dph_space/$pkt_pdml";
+my $pkt_hex_ascii_file   = "$dph_space/$pkt_hex_ascii";
+my $pkt_text_file        = "$dph_space/$pkt_text";
+my $pkt_ttrace_file      = "$dph_space/$pkt_ttrace";
+my $pkt_status_file      = "$dph_space/$pkt_status";
+my $pkt_error_file       = "$dph_space/$pkt_error";
+my $pkt_stream_encap_file = "$dph_space/$pkt_stream_encap";
+my $pkt_ifds_file        = "$dph_space/$pkt_ifds";
+my $pkt_ifls_file        = "$dph_space/$pkt_ifls";
+my $pkt_wshark_log_file  = "$dph_space/$pkt_wshark_log";
+my $pkt_tshark_data_file = "$dph_space/$pkt_tshark_data";
+my $pkt_parcels_directions_file = "$dph_space/$pkt_parcels_directions";
+
+#
+# URLs
+#
+
+my $pkt_main_dir_url     = "http://$web_server_doc_root/$dph_out_dir/$id/";
+my $pkt_main_html_url    = "http://$web_server_doc_root/$dph_out_dir/$id/$pkt_main_html";
+
+my $pkt_mail_url         = "./$pkt_mail";
+my $pkt_mail2user_url    = "./$pkt_mail2user";
+my $pkt_log_url          = "./$pkt_log";
+my $pkt_input_url        = "./$pkt_input";
+my $pkt_hex_url          = "./$pkt_hex";
+my $pkt_html_url         = "./$pkt_html";
+my $pkt_pcap_url         = "./$pkt_pcap";
+my $pkt_pdml_url         = "./$pkt_pdml";
+my $pkt_hex_ascii_url    = "./$pkt_hex_ascii";
+my $pkt_text_url         = "./$pkt_text";
+my $pkt_ttrace_url       = "./$pkt_ttrace";
+my $pkt_status_url       = "./$pkt_status";
+my $pkt_error_url        = "./$pkt_error";
+my $pkt_wshark_log_url   = "./$pkt_wshark_log";
+
+
+my $pkt_main_html_fh;
+my $pkt_log_fh;
+
+
+# Create the directory and copy necessory files
+system("mkdir -p $dph_space");
+system("mkdir -p $dph_space/win");
+
+system("cp $dph_dat_dir/pdml2html_packet_hex.xsl $dph_space/pdml2html.xsl");
+system("cp $dph_dat_dir/folder.png $dph_space/");
+
+open $pkt_log_fh,'>', $pkt_log_file or die "Can't open file $pkt_log_file: $!";
+
+dph_log_status("Packet Decode started (Run $id)\n");
+
+#
+# Do the deed
+#
+
+dph_log_debug("The Index for this run : $id\n");
+
+open my $dph_log_fh,'>>', $dph_log_file or die "Can't open file $dph_log_file: $!";
+printf $dph_log_fh "%s:: %4s %s\n",
+                   $script_start_timestamp, $ENV{REMOTE_ADDR}, $hextype;
+close ($dph_log_fh); 
+
+
+#
+# Validations
+#
+dph_validations();
+
+
+dph_write_to_tshark_data_file("dph_counter", $id);
+
+
+$dph_user_pkt_main_html_url = "http://$web_server/tt/dph/data/$id/$pkt_main_html";
+$dph_user_dph_dir_url       = "http://$web_server/tt/dph/data/$id";
+
+my $user_input = <STDIN>;
+
+log_all_vars();
+
+my $dph_counter_hex_str = sprintf("%08x", $id);
+
+
+# "packet_hex" 
+
+my $fh = cmn::open_file($pkt_input_file, "append");
+print $fh "$input_text";
+cmn::close_file($fh);
+
+
+if ($debug_log_raw_file) {
+    my $file_contents = `cat $pkt_input_file`;
+    dph_log_debug("$pkt_input File:\n$file_contents\n");
+}
+
+if (-e $pkt_input_file) {
+    dph_log_debug("File $pkt_input_file exists\n");
+} else {
+    dph_show_error("File $pkt_input_file  does not exist\n");
+}
+
+my $pkt_input_filesize = -s $pkt_input_file;
+
+if ($pkt_input_filesize != 0) {
+    dph_log_debug("File $pkt_input_file is not empty\n");
+} else {
+    # TBD Check if following error is needed
+    #
+    dph_show_error("Looks like tool could not capture the packets. \nTry reducing the LU packet capture buffer size (Advanced Options). \n");
+}
+
+#
+# Count Number of parcels received/sent/total
+#
+($parcels_rcvd, $parcels_sent, $parcels_total) = dph_count_parcels($pkt_input_file);
+
+#
+# Process raw hex file and generate the hex file for text2pcap
+#
+dph_convert_raw_file_to_text2pcap_file($pkt_input_file, $pkt_hex_file, $hextype, $dph_space, 
+                                       $debug_packet_hex_processing);
+
+if ($debug_log_text2pcap_file) {
+    my $file_contents = `cat $pkt_hex_file`;
+    dph_log_debug("$pkt_hex_file File:\n$file_contents\n");
+}
+
+dph_log_status("Generating pcap file...\n"); 
+if ($hextype eq "ethernet") {
+    cmn::execute_command("$text2pcap_binary $pkt_hex_file $pkt_pcap_file");
+} elsif ($hextype eq "ipv4") {
+    cmn::execute_command("$text2pcap_binary -e 0x0800 $pkt_hex_file $pkt_pcap_file");
+} elsif ($hextype eq "ipv6") {
+    cmn::execute_command("$text2pcap_binary -e 0x86dd $pkt_hex_file $pkt_pcap_file");
+} else {
+#    exit;
+}
+
+dph_log_status("Decoding parcels...\n"); 
+system("echo Hex/ASCII of the packet: > $pkt_hex_ascii_file");
+
+dph_log_status("Generating output files...\n"); 
+
+cmn::execute_command("$tshark_binary $tshark_preferences -r $pkt_pcap_file -T pdml > $pkt_pdml_file");
+dph_log_debug("Generated $pkt_pdml file\n");
+cmn::execute_command("$tshark_binary $tshark_preferences -r $pkt_pcap_file -x >> $pkt_hex_ascii_file");
+dph_log_debug("Generated $pkt_hex_ascii file\n");
+cmn::execute_command("$tshark_binary $tshark_preferences -r $pkt_pcap_file -xV >> $pkt_text_file");
+dph_log_debug("Generated $pkt_text file\n");
+
+dph_generate_pkt_html_file();
+
+dph_generate_pkt_main_html_file();
+
+
+#
+# Send mails
+#
+# write_mail();
+
+
+#unlink $pkt_log_file;
+#unlink $pkt_input_file;
+#unlink $pkt_hex_file;
+#unlink $pkt_pcap_file;
+#unlink $pkt_hex_n_ascii_file
+#unlink $pkt_pdml_file;
+#cmn::execute_command("chown root:root $pkt_log_file");
+cmn::execute_command("chmod 600 $pkt_log_file");
+
+
+my $background_process="no";
+my $kidpid;
+
+if ($is_cgi) {
+   $background_process="yes";
+}
+
+if ($background_process eq "yes") {
+   dph_log_debug("Running as CGI\n");
+
+   #
+   # Fork. 
+   # Parent Process displays the progress
+   # Child process does the deed
+   #
+   # ######   ####   #####   #    #
+   # #       #    #  #    #  #   #
+   # #####   #    #  #    #  ####
+   # #       #    #  #####   #  #
+   # #       #    #  #   #   #   #
+   # #        ####   #    #  #    #
+   #
+   die "Could not fork()\n" unless defined (my $kidpid = fork);
+
+   if ($kidpid) {
+       #    
+       # Parent Process
+       #    
+       # #####     ##    #####   ######  #    #   #####
+       # #    #   #  #   #    #  #       ##   #     #
+       # #    #  #    #  #    #  #####   # #  #     #
+       # #####   ######  #####   #       #  # #     #
+       # #       #    #  #   #   #       #   ##     #
+       # #       #    #  #    #  ######  #    #     #
+       #
+       #
+       # #####   #####    ####    ####   ######   ####    ####
+       # #    #  #    #  #    #  #    #  #       #       #
+       # #    #  #    #  #    #  #       #####    ####    ####
+       # #####   #####   #    #  #       #            #       #
+       # #       #   #   #    #  #    #  #       #    #  #    #
+       # #       #    #   ####    ####   ######   ####    ####
+       #
+
+
+
+       dph_log_debug("Parent Process: Generate WaitingPage\n");
+       my $banner = dph_get_banner();
+
+       WaitingPage($banner, "$pkt_main_html_url");
+       dph_log_debug("Parent Process: Generate WaitingPage:Done\n");
+       exit;
+    }
+
+    # 
+    #
+    # Child process falls through here ....
+    #
+    #
+
+
+} else {
+   $kidpid = 0;
+   dph_log_debug("Running as native script\n");
+=for comment
+   print "perl include path\n";
+   foreach $prefix (@INC) {
+       print " $prefix\n";
+   }
+   print "The id: $id\n";
+=cut
+}
+
+
+close ($pkt_log_fh); 
+exit 0;
+
+
+
+
+#################################################################################################
+
+#     #####
+#    #     #  #    #  #####   #####    ####   #    #   #####     #    #    #  ######   ####
+#    #        #    #  #    #  #    #  #    #  #    #     #       #    ##   #  #       #
+#     #####   #    #  #####   #    #  #    #  #    #     #       #    # #  #  #####    ####
+#          #  #    #  #    #  #####   #    #  #    #     #       #    #  # #  #            #
+#    #     #  #    #  #    #  #   #   #    #  #    #     #       #    #   ##  #       #    #
+#     #####    ####   #####   #    #   ####    ####      #       #    #    #  ######   ####
+#
+
+sub dph_usage 
+{
+    print "\n";
+    print "dph  -h\n"; 
+    print "\n";
+}
+
+sub dph_display_banner 
+{
+   print "The id: $id\n";
+   my $dph_banner;
+   $dph_banner = Text::Banner->new;
+   $dph_banner->set($id);
+   $dph_banner->size(2);
+   $dph_banner->fill('*');
+   $dph_banner->rotate('h');
+   print $dph_banner->get;
+}
+
+sub dph_get_banner 
+{
+   print "The id: $id\n";
+   my $dph_banner;
+   $dph_banner = Text::Banner->new;
+   $dph_banner->set($id);
+   $dph_banner->size(2);
+   $dph_banner->fill('*');
+   $dph_banner->rotate('h');
+   return $dph_banner->get;
+}
+
+
+sub dph_get_next_id
+{
+    my $dph_counter;
+    my $dph_counter_fh;
+
+
+    unless (-e $dph_counter_file) {
+        open $dph_counter_fh,'>', $dph_counter_file or die "Can't open file $dph_counter_file: $!";
+        print $dph_counter_fh "0";
+        close ($dph_counter_fh); 
+    } 
+
+    open $dph_counter_fh,'+<', $dph_counter_file or die "Can't open file $dph_counter_file: $!";
+    flock($dph_counter_fh, 2);
+    $dph_counter = <$dph_counter_fh>; 
+    truncate($dph_counter_fh,0);
+    seek($dph_counter_fh,0,0);
+
+    $dph_counter++;
+
+    print $dph_counter_fh "$dph_counter";
+    flock($dph_counter_fh, 8);
+    close ($dph_counter_fh); 
+    return $dph_counter;
+}
+
+
+sub log_all_vars 
+{
+    dph_log_debug("----------------------------------------------------------\n"); 
+    dph_log_debug("hextype             : $hextype\n"); 
+    dph_log_debug("----------------------------------------------------------\n"); 
+
+    dph_log_debug("pkt_main_html_file  : $pkt_main_html_file\n"); 
+    dph_log_debug("pkt_mail_file       : $pkt_mail_file\n");      
+    dph_log_debug("pkt_mail2user_file  : $pkt_mail2user_file\n"); 
+    dph_log_debug("pkt_log_file        : $pkt_log_file\n");       
+    dph_log_debug("pkt_input_file      : $pkt_input_file\n");     
+    dph_log_debug("pkt_hex_file        : $pkt_hex_file\n");       
+    dph_log_debug("pkt_html_file       : $pkt_html_file\n");      
+    dph_log_debug("pkt_pcap_file       : $pkt_pcap_file\n");      
+    dph_log_debug("pkt_pdml_file       : $pkt_pdml_file\n");      
+    dph_log_debug("pkt_hex_ascii_file  : $pkt_hex_ascii_file\n"); 
+    dph_log_debug("pkt_text_file       : $pkt_text_file\n");      
+    dph_log_debug("pkt_ttrace_file     : $pkt_ttrace_file\n");    
+    dph_log_debug("pkt_status_file     : $pkt_status_file\n");    
+    dph_log_debug("pkt_error_file      : $pkt_error_file\n");     
+    dph_log_debug("----------------------------------------------------------\n"); 
+
+
+    dph_log_debug("tshark_binary : $tshark_binary\n");
+
+
+    if(defined $input_text) {
+        dph_log_debug("input_text: $input_text\n"); 
+    } else {
+        dph_log_debug("input_text: empty\n"); 
+    }
+}
+
+
+sub dph_validations 
+{
+}
+
+sub dph_write_to_tshark_data_file
+{
+    my $key   = $_[0];
+    my $value = $_[1];
+
+    my $fh = cmn::open_file($pkt_tshark_data_file, "append");
+    print $fh "$key:$value;\n";
+    dph_log_debug("_______ dph_append_to_tshark_data_file - $key:$value; \n");
+    cmn::close_file($fh);
+}
+
+sub dph_count_parcels 
+{
+    my $parcels_file = $_[0];
+    my ($rcvd, $sent, $total);
+
+
+    my $dir_fh = cmn::open_file($pkt_parcels_directions_file, "append");
+    my $fh     = cmn::open_file($parcels_file, "read");
+
+    my $parcel_number = 1;
+
+    # 
+    # First Parcel no direction 
+    #
+    print $dir_fh "$parcel_number:e;\n"; 
+
+    while (my $pkt_line = <$fh>) {
+        #dph_log_debug("pkt_line: $pkt_line");
+        if ($pkt_line =~ /^Received \d+ byte parcel:/) { 
+            $rcvd ++;
+            $parcel_number ++;
+            print $dir_fh "$parcel_number:r;\n";
+        };
+        if ($pkt_line =~ /^Sent \d+ byte parcel:/) { 
+            $sent ++; 
+            $parcel_number ++;
+            print $dir_fh "$parcel_number:s;\n";
+        };
+    }
+
+    cmn::close_file($fh);
+    cmn::close_file($dir_fh);
+
+    $total = $parcel_number;
+    return($rcvd, $sent, $total);
+}
+
+
+sub dph_convert_raw_file_to_text2pcap_file 
+{
+    my ($fh0, $fh1, $fh2);
+   
+    my $raw_file          = $_[0];
+    my $text2pcap_file    = $_[1];
+    my $hextype           = $_[2];
+    my $tmp_space         = $_[3];
+    my $dhp               = $_[4]; # Debug hex processing
+
+    my $pkt_processed0_file  = "$tmp_space/$pkt_processed0";
+    my $pkt_processed1_file  = "$tmp_space/$pkt_processed1";
+    my $pkt_processed2_file  = "$tmp_space/$pkt_processed2";
+
+    system("cp $raw_file $pkt_processed0_file");
+
+    my $rec_separator = "RECORD_START"; # TODO use this var
+
+    $fh0 = cmn::open_file($pkt_processed0_file, "read");
+    $fh1 = cmn::open_file($pkt_processed1_file, "write");
+
+
+    #
+    # Remove the square bracket and content  
+    # Needed packet dump in microkernel
+    # [Fri Apr  4 21:39:57 2014 LOG: Debug] 0x20: 0x01 0x0 ...
+    #
+
+    while (my $pkt_hex_line = <$fh0>) {
+        if ($dhp) { dph_log_debug("(pre)pkt_hex_line 0. $pkt_hex_line\n"); }
+        $pkt_hex_line =~ s/\[.*\]//g;
+        if ($dhp) { dph_log_debug("(pre)pkt_hex_line 1. $pkt_hex_line\n"); }
+        print $fh1 "$pkt_hex_line\n";
+    }
+    cmn::close_file($fh0);
+    cmn::close_file($fh1);
+
+    
+    #
+    # Add "RECORD_START" in the end of the file
+    #
+    open my $fh,'>>', $pkt_processed1_file or die "Can't open file $pkt_processed1_file: $!";
+    print $fh "RECORD_START";
+    close ($fh); 
+
+    local $/ = "RECORD_START";
+
+    $fh1 = cmn::open_file($pkt_processed1_file, "read");
+    $fh2 = cmn::open_file($pkt_processed2_file, "write");
+
+    #
+    # Reads the records between two "RECORD_START" strings
+    # The $pkt_hex_line contains data starting after a RECORD_START 
+    # till the next (and including) RECORD_START
+    #
+    while (my $pkt_hex_line = <$fh1>) {
+
+        if ($dhp) { dph_log_debug("pkt_hex_line 0. $pkt_hex_line\n"); }
+        #
+        # The first record is may be empty (Nothing or one space)
+        #
+        if (($pkt_hex_line =~ /^ RECORD_START/) || ($pkt_hex_line =~ /^RECORD_START/)) {
+            next;
+        }
+
+        # Remove RECORD_START
+        $pkt_hex_line =~ s/RECORD_START//g;
+        if ($dhp) { dph_log_debug("pkt_hex_line 1. $pkt_hex_line\n"); }
+
+        # s///
+        # ------------
+        # Perl search/replace
+        # s/regex/replacement/modifiers
+        #
+        # modifiers : -
+        #    : no modifier => replace only first occurrence
+        #  g : search and replace all occurrences of the regex in the string
+        #  r : non-destructive modifier. 
+        #  e : evaluation modifier => wraps an eval{...} around the replacement 
+        #      string and the evaluated result is substituted for the matched substring.
+        #
+        # tr///
+        # ------------
+        # Transliteration operator : Does character by character translation
+        #     It is used to change a set of characters into another set of characters 
+        #     as its not possible with "s//" operator
+        # tr/searchr-characters-list/replacement-characters-list/modifiers 
+        #
+        # Note: tr/// is same as y///
+        # 
+        # modifiers : -
+        #  c : complements or inverts the searchlist
+        #  d : delete found but unreplaced characters
+        #      $string1 = 'my name is sam anderson';
+        #      $string1 =~ tr/a-z/ABCDE/; => EE EAEE EE EAE AEDEEEEE
+        #                  The characters f-z do not no have matching characters in
+        #                  replacement-characters-list and are replaced by E    
+        #
+        #      $string2 = 'my name is sam anderson';
+        #      $string2 =~ tr/a-z/ABCDE/d; => AE A ADE
+        #                  The characters f-z are deleted as they do not have matching 
+        #                  characters in replacement-characters-list
+        #      
+        #  s : sequences of characters that were transliterated to the 
+        #      same character are squashed down to a single instance of 
+        #      the character
+        #
+
+        #
+        # Remove New lines with space resulting in joined line devoid of \n
+        #
+        $pkt_hex_line =~ y/\n/ /d;
+        if ($dhp) { dph_log_debug("pkt_hex_line 2. $pkt_hex_line\n"); }
+
+        # 
+        # Replace ^M with space
+        #
+        $pkt_hex_line =~ tr/\015/ /d;
+        if ($dhp) { dph_log_debug("pkt_hex_line 3. $pkt_hex_line\n"); }
+
+        # Remove
+        # Dispatch cookie:
+        # Needed for lu parcel format -
+        # Dispatch cookie: 0x002e000000000000
+
+        $pkt_hex_line =~ s/Dispatch cookie\://g;
+        if ($dhp) { dph_log_debug("pkt_hex_line 4. $pkt_hex_line\n"); }
+
+
+        #
+        # " 
+        # Needed for format -
+        # Runsim parcel formats
+        # "\xBB\xBB\xBB\xBB\xBB\xBB\xAA\xAA"
+        # "\xAA\xAA\xAA\xAA\x81\x00\x00\x0A"
+        # ...
+
+        #
+        $pkt_hex_line =~ tr/\"/ /d;
+        if ($dhp) { dph_log_debug("pkt_hex_line 5. $pkt_hex_line\n"); }
+
+        # Remove \x
+        $pkt_hex_line =~ s/\\x//g;
+        if ($dhp) { dph_log_debug("pkt_hex_line 6. $pkt_hex_line\n"); }
+
+
+        # Remove 
+        # Data:
+        # Needed for format -
+        # Data: 0022830a60ad0050
+        # Data: 56b210c208004500
+        # Data: 0054cee200004001
+        # ...
+        #
+        $pkt_hex_line =~ s/Data\://g;
+        if ($dhp) { dph_log_debug("pkt_hex_line 7. $pkt_hex_line\n"); }
+
+
+        #
+        # ' 
+        # Needed for format -
+        # TBD : Remove if not needed
+
+        $pkt_hex_line =~ s/\'//g;
+        if ($dhp) { dph_log_debug("pkt_hex_line 8. $pkt_hex_line\n"); }
+
+        # Delete
+        # ' 
+        # Needed for format -
+        # Output of 'tcpdump -x' Command :-
+        # 0x0000:  0050 56b2 0544 0050 568a 0a16 0800 4500
+        # 0x0010:  003c 0000 4000 4006 043a 0a66 118b 0a66
+        # 0x0020:  102c 0374 0385 3240 e7cc 49f2 8212 a012
+        # 0x0030:  16a0 47ec 0000 0204 05b4 0402 080a f4e1
+        # 0x0040:  a85c cd39 5b63 0103 0302
+
+        $pkt_hex_line =~ s/0[xX][\w]*\://g;
+        if ($dhp) { dph_log_debug("pkt_hex_line 9. $pkt_hex_line\n"); }
+
+        # Delete 0x or 0X
+        $pkt_hex_line =~ s/0[xX]//g;
+        if ($dhp) { dph_log_debug("pkt_hex_line 10. $pkt_hex_line\n"); }
+
+        #
+        # 10a0020b => 10a0 020b
+        # 
+        $pkt_hex_line =~ s/([\w][\w])([\w][\w])/$1 $2/g;
+        if ($dhp) { dph_log_debug("pkt_hex_line 11. $pkt_hex_line\n"); }
+
+        #
+        # 10a0 020b => 10 a0 02 0b
+        # 
+        $pkt_hex_line =~ s/([\w][\w])([\w][\w])/$1 $2/g;
+        if ($dhp) { dph_log_debug("pkt_hex_line 12. $pkt_hex_line\n"); }
+
+        #
+        # Add 000000 in the begining - needed by text2pcap
+        # 
+        $pkt_hex_line = "000000 $pkt_hex_line";
+        if ($dhp) { dph_log_debug("pkt_hex_line 13. $pkt_hex_line\n"); }
+
+        # 
+        # Replace multiple spaces with one space
+        #
+        $pkt_hex_line =~ s/ +/ /g;
+        if ($dhp) { dph_log_debug("pkt_hex_line 14. $pkt_hex_line\n"); }
+
+
+
+        print $fh2 "$pkt_hex_line\n";
+    }
+
+    cmn::close_file($fh1);
+    cmn::close_file($fh2);
+
+    if ($dhp) {
+        my $result = `cat $pkt_processed2_file`;
+        dph_log_debug("Contents of $pkt_processed2_file :$result\n");
+    }
+
+    if ($dhp) { dph_log_debug("hextype : $hextype\n"); }
+
+    system("cp $pkt_processed2_file $text2pcap_file");
+
+    #unlink $pkt_processed0_file;
+    #unlink $pkt_processed1_file;
+    #unlink $pkt_processed2_file;
+}
+
+sub dph_generate_pkt_html_file 
+{
+    my $html_fh;
+
+    open $html_fh,'>>', $pkt_html_file or die "Can't open the $pkt_html_file file: $!";
+
+    print $html_fh <<END_OF_PKT_HTML1;
+    <pre>
+<a href="$pkt_input_url" target="_blank">Raw Packet hex file</a>
+<a href="$pkt_text_url" target="_blank">Detailed packet text file</a>
+    </pre>
+<!--a href="$pkt_hex_ascii_url" target="_blank">Processed packet hex file</a-->
+<!--a href="$pkt_log_url" target="_blank">Debug log file</a-->
+END_OF_PKT_HTML1
+
+    print $html_fh <<END_OF_PKT_HTML7;
+    <pre>
+<h4>$id packets decoded</h4>
+Send feedback to: <a href="mailto:dph\@matfallu.in?subject=Packet capture/decode tool">dph\@matfallu.in</a>
+{Powered by wireshark}
+    </pre>
+
+END_OF_PKT_HTML7
+
+
+
+    close ($html_fh); 
+    dph_log_debug("Generated $pkt_html_file file\n");
+}
+
+
+sub dph_generate_pkt_main_html_file {
+    open $pkt_main_html_fh,'>', $pkt_main_html_file or die "Can't open the $pkt_main_html_file file: $!";
+    print $pkt_main_html_fh <<END_OF_PKT_MAIN_HTML;
+    <HTML>
+    <HEAD>
+    <TITLE>Packet Hex Decode Powered by tshark</TITLE>
+    </HEAD>
+    <FRAMESET cols="23%, 77%" border="0">
+      <FRAME src="$pkt_html_url">
+      <FRAMESET rows="*,200" border="1">
+          <FRAME src="$pkt_pdml_url">
+          <FRAME src="$pkt_hex_ascii_url" frameborder="0">>
+      </FRAMESET>
+    </FRAMESET>
+    </HTML>
+END_OF_PKT_MAIN_HTML
+    close ($pkt_main_html_fh); 
+
+    dph_log_debug("Generated $pkt_main_html_file file\n");
+}
+
+sub write_mail 
+{
+    open my $mail_fh,'>', $pkt_mail_file or die "Can't open file $pkt_mail_file: $!";
+    print $mail_fh "Subject: LU Capture Decode Tool (Run $id)\n";
+    print $mail_fh "_________________________________________________\n";
+    print $mail_fh "Time             : $script_start_timestamp)\n";
+    print $mail_fh "hextype          : $hextype \n";
+    print $mail_fh "REMOTE_ADDR      : $ENV{REMOTE_ADDR} \n";
+    print $mail_fh "REMOTE_USER      : $ENV{REMOTE_USER} \n";
+    print $mail_fh "_________________________________________________\n";
+    print $mail_fh "\n";
+    print $mail_fh "\n";
+    print $mail_fh "$pkt_main_html_url\n";
+    print $mail_fh "$pkt_main_dir_url\n";
+    print $mail_fh "\n";
+    print $mail_fh "____________ $ENV{REMOTE_ADDR}___________________\n";
+
+    $mail_fh->flush(); 
+    close ($mail_fh); 
+
+    sleep 10;
+
+    cmn::send_mail($pkt_mail_file);
+}
+
+sub WaitingPage 
+{
+
+    my $display_str = $_[0];
+    my $url         = $_[1];
+    print "Content-type: text/html \n\n";
+    print "<pre>";
+    print $display_str;
+    print "</pre>";
+    print <<END_OF_STATUS_HTML;
+    <HTML> <HEAD>
+    <TITLE>LU Capture and Decode in Progress ...</TITLE>
+    <META HTTP-EQUIV="refresh" content="1; url=$url">
+    </HEAD> </HTML>
+END_OF_STATUS_HTML
+
+}
+
+sub dph_log_status 
+{
+    open my $pkt_status_fh,'>>', $pkt_status_file or die "Can't open file $pkt_status_file: $!";
+    print $pkt_status_fh "@_"; 
+    $pkt_status_fh->flush();
+    close ($pkt_status_fh); 
+    if (!$is_cgi) {
+        print @_;
+    }
+}
+
+sub dph_log_debug 
+{
+    if (!$dph_debug) {
+        return;
+    }
+    &cmn::debug_log("dph", $dph_log_to_file, $pkt_log_file, $pkt_log_fh, @_);
+}
+
+sub dph_show_error 
+{
+   dph_log_debug("dph_show_error: @_ \n");
+   &cmn::show_error("dph", $pkt_log_url, $pkt_error_file, @_);
+   write_mail();
+   exit 1;
+}
+
+sub get_unique_id 
+{
+    # Use Apache's mod_unique_id if available
+    return $ENV{UNIQUE_ID} if exists $ENV{UNIQUE_ID};
+    
+    require Digest::MD5;
+    
+    my $md5 = new Digest::MD5;
+    my $remote = $ENV{REMOTE_ADDR} . $ENV{REMOTE_PORT};
+    
+    # Note this is intended to be unique, and not unguessable
+    # It should not be used for generating keys to sensitive data
+    my $id = $md5->md5_base64( time, $$, $remote );
+    $id =~ tr|+/=|-_.|;  # Make non-word chars URL-friendly
+    return $id;
+}
+
