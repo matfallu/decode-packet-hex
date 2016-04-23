@@ -279,12 +279,8 @@ if (-e $pkt_input_file) {
 
 my $pkt_input_filesize = -s $pkt_input_file;
 
-if ($pkt_input_filesize != 0) {
-    dph_log_debug("File $pkt_input_file is not empty\n");
-} else {
-    # TBD Check if following error is needed
-    #
-    dph_show_error("Looks like tool could not capture the packets. \nTry reducing the LU packet capture buffer size (Advanced Options). \n");
+if ($pkt_input_filesize == 0) {
+    dph_log_debug("File $pkt_input_file is empty\n");
 }
 
 #
@@ -831,7 +827,7 @@ END_OF_PKT_HTML1
     print $html_fh <<END_OF_PKT_HTML7;
     <pre>
 <h4>$id packets decoded</h4>
-Send feedback to: <a href="mailto:dph\@matfallu.in?subject=Packet capture/decode tool">dph\@matfallu.in</a>
+Send feedback to: <a href="mailto:dph\@matfallu.in?subject=Decode Packet Hexdump">dph\@matfallu.in</a>
 {Powered by wireshark}
     </pre>
 
@@ -868,7 +864,7 @@ END_OF_PKT_MAIN_HTML
 sub write_mail 
 {
     open my $mail_fh,'>', $pkt_mail_file or die "Can't open file $pkt_mail_file: $!";
-    print $mail_fh "Subject: LU Capture Decode Tool (Run $id)\n";
+    print $mail_fh "Subject: Decode Packet Hexdump (Run $id)\n";
     print $mail_fh "_________________________________________________\n";
     print $mail_fh "Time             : $script_start_timestamp)\n";
     print $mail_fh "hextype          : $hextype \n";
@@ -901,7 +897,7 @@ sub WaitingPage
     print "</pre>";
     print <<END_OF_STATUS_HTML;
     <HTML> <HEAD>
-    <TITLE>LU Capture and Decode in Progress ...</TITLE>
+    <TITLE>Decode in Progress ...</TITLE>
     <META HTTP-EQUIV="refresh" content="1; url=$url">
     </HEAD> </HTML>
 END_OF_STATUS_HTML
