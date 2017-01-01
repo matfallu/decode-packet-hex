@@ -1,11 +1,14 @@
 <html>
 <head>
-<title>Decpde Packet Hex</title>
+<title>Wireshark Decode Packet Hex</title>
+<style>
+.hide { position:absolute; top:-1px; left:-1px; width:1px; height:1px; }
+</style>
 </head>
 <body>
 <div style="text-align: center;">
     <table
-        style="text-align: left; height: 353px; background-color: white; margin-left: auto; margin-right: auto; width: 700px;"
+        style="text-align: left; height: 353px; background-color: white; margin-left: auto; margin-right: auto; width: 800px;"
         border="0" cellpadding="2" cellspacing="2">
         <tbody>
         <tr>
@@ -13,22 +16,22 @@
             </td>
         </tr>
         <tr align="center">
-            <td
-                style="vertical-align: top; background-color: rgb(102, 51, 51);"><big><big><span
-                            style="font-family: Arial; font-weight: bold;">Decode
-                            Packet Hexdump</span></big></big><br>
-                -by matfallu.in<br>
+            <td style="vertical-align: top; " bgcolor="#8B4513">
+            <a href="https://matfallu.in/tt/dph/" style="text-decoration: none">
+            <big><big><span style="font-family: Arial; font-weight: bold; color:black">Decode Packet Hexdump</span></big></big>
+            </a><br>
+                {wireshark power}<br>
             </td>
         </tr>
         <tr>
             <td
                 style="vertical-align: top; background-color: rgb(204, 204, 204);">
                 <div style="text-align: center;"> </div>
-                <form action="http://matfallu.in/cgi-bin/tt/dph/dph" method="post">
+                <form action="https://matfallu.in/cgi-bin/tt/dph/dph" method="post" target="resulFrame">
                     <div style="text-align: center;"> </div>
                     <div>
                         <div style="text-align: center;"><textarea
-                                name="text" rows="15" cols="100">45 00 00 20 00 00 00 00
+                                name="text" rows="10" cols="100">45 00 00 20 00 00 00 00
 ff 11 60 bd c8 05 65 02
 c8 05 66 02 13 56 13 56
 00 0c b6 40 54 65 73 74 </textarea><br>
@@ -37,7 +40,7 @@ c8 05 66 02 13 56 13 56
                                 style="font-family: Arial;">Hex dump type: <br>
                                 <input name="hextype" value="ethernet" type="radio">Ethernet
                                 (Packet hex starts with Ethernet header)<br>
-                                <input name="hextype" value="ipv4" type="radio">IPv4 (Packet
+                                <input name="hextype" value="ipv4" type="radio" checked>IPv4 (Packet
                                 hex starts with Ipv4 headar. Dummy Ethernet header will be added) <br>
                                 <input name="hextype" value="ipv6" type="radio">IPv6 (Packet
                                 hex starts with Ipv6 header. Dummy Ethernet header will be added</small>
@@ -49,93 +52,16 @@ c8 05 66 02 13 56 13 56
             </td>
         </tr>
         <tr>
-            <td style="vertical-align: top;">Hex formats supported:<br>
+            <td style="vertical-align: top;">
+             <iframe name="resulFrame" src="./supported_hex_formats.html" width="800px" height="1200px"  border="0"></iframe>
             </td>
         </tr>
-        <tr style="font-family: monospace;">
-            <td style="vertical-align: top;">Fromat 1 :-<br>
-                00 24 8C 01 <br>
-                79 08 00 24 <br>
-                8C 01 79 06 <br>
-                08 00<br>
-                45 00 00 20<br>
-                00 00 00 00<br>
-                ff 11 60 bd<br>
-                c8 05 65 02<br>
-                c8 05 66 02<br>
-                13 56 13 56<br>
-                00 0c b6 40<br>
-                54 65 73 74<br>
-                <br>
-                Fromat 2 :-<br>
-                Data: 0022830a60ad0050<br>
-                Data: 56b210c208004500<br>
-                Data: 0054cee200004001<br>
-                Data: b2b5c8060102c806<br>
-                Data: 6802080069947206<br>
-                Data: 000050d3e2690001<br>
-                Data: fe2308090a0b0c0d<br>
-                Data: 0e0f101112131415<br>
-                Data: 161718191a1b1c1d<br>
-                Data: 1e1f202122232425<br>
-                Data: 262728292a2b2c2d<br>
-                Data: 2e2f303132333435<br>
-                Data: 3637<br>
-                <br>
-                Fromat 3 :-<br>
-                0x84 0x18<br>
-                0x88 0x10 0x89 0x9c 0x00 0x50 0x56 0xb9<br>
-                0x65 0xea 0x08 0x00 0x45 0x00 0x00 0x3c<br>
-                0x32 0x1e 0x00 0x05 0x40 0x11 0x5e 0x7e<br>
-                0xc8 0x06 0x01 0x02 0xc9 0x06 0x58 0x01<br>
-                0xb1 0xc8 0x00 0x36 0x00 0x08 0x63 0xcf<br>
-                0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00<br>
-                0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00<br>
-                0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00<br>
-                0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00<br>
-                <br>
-                Fromat 4 :-<br>
-                Output of 'tcpdump -x' Command :-<br>
-                0x0000:&nbsp; 0050 56b2 0544 0050 568a 0a16 0800 4500<br>
-                0x0010:&nbsp; 003c 0000 4000 4006 043a 0a66 118b 0a66<br>
-                0x0020:&nbsp; 102c 0374 0385 3240 e7cc 49f2 8212 a012<br>
-                0x0030:&nbsp; 16a0 47ec 0000 0204 05b4 0402 080a f4e1<br>
-                0x0040:&nbsp; a85c cd39 5b63 0103 0302<br>
-                <br>
-                Fromat 5 :-<br>
-                0x45 0x00 0x00 0x5c 0x00<br>
-                [Fri Apr&nbsp; 4 21:39:57 2014 LOG: Debug] 0x20: 0x01 0x00 0x00 0x1f
-                0x11 0x00 0x2c 0xc2 0xa8 0x0c 0x0f 0xc2 0xa8 0x0a 0x05 0x0d<br>
-                [Fri Apr&nbsp; 4 21:39:57 2014 LOG: Debug] 0x30: 0x80 0x04 0xd2 0x00
-                0x48 0xce 0x03 0x61 0x62 0x63 0x64 0x65 0x66 0x67 0x68 0x69<br>
-                [Fri Apr&nbsp; 4 21:39:57 2014 LOG: Debug] 0x40: 0x6a 0x6b 0x6c 0x6d
-                0x6e 0x6f 0x70 0x71 0x72 0x73 0x74 0x75 0x76 0x77 0x78 0x79<br>
-                [Fri Apr&nbsp; 4 21:39:57 2014 LOG: Debug] 0x50: 0x7a 0x61 0x62 0x63
-                0x64 0x65 0x66 0x67 0x68 0x69 0x6a 0x6b 0x6c 0x6d 0x6e 0x6f<br>
-                [Fri Apr&nbsp; 4 21:39:57 2014 LOG: Debug] 0x60: 0x70 0x71 0x72 0x73
-                0x74 0x75 0x76 0x77 0x78 0x79 0x7a 0x61 0x62 0x63 0x64 0x65<br>
-                [Fri Apr&nbsp; 4 21:39:57 2014 LOG: Debug] 0x70: 0x66 0x67 0x68 0x69
-                0x6a 0x6b 0x6c<br>
-                <br>
-                Fromat 6 :-<br>
-                "\xBB\xBB\xBB\xBB\xBB\xBB\xAA\xAA"<br>
-                "\xAA\xAA\xAA\xAA\x81\x00\x00\x0A"<br>
-                "\x08\x00\x45\x00\x00\x5C\x00\x01"<br>
-                "\x00\x00\x20\x11\x00\x36\xC2\xA8"<br>
-                "\x0a\x05\xC2\xA8\x0b\x05\x0D\x80"<br>
-                "\x04\xD2\x00\x48\xCF\x0D\x61\x62"<br>
-                "\x63\x64\x65\x66\x67\x68\x69\x6A"<br>
-                "\x6B\x6C\x6D\x6E\x6F\x70\x71\x72"<br>
-                "\x73\x74\x75\x76\x77\x78\x79\x7A"<br>
-                "\x61\x62\x63\x64\x65\x66\x67\x68"<br>
-                "\x69\x6A\x6B\x6C\x6D\x6E\x6F\x70"<br>
-                "\x71\x72\x73\x74\x75\x76\x77\x78"<br>
-                "\x79\x7A\x61\x62\x63\x64\x65\x66"<br>
-                "\x67\x68\x69\x6A\x6B\x6C"<br>
-                <br>
-                <br>
+        <tr align="center">
+            <td style="vertical-align: top; " bgcolor="#8B4513">
+                ~~~
             </td>
         </tr>
+ 
         </tbody>
     </table>
     <br>
