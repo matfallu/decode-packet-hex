@@ -147,7 +147,8 @@ my $pkt_processed2       = "dph$id.processed2.txt";
 my $pkt_hex              = "dph$id.hex.txt";
 my $pkt_pcap             = "dph$id.pcap";
 my $pkt_html             = "dph$id.html";
-my $pkt_pdml             = "dph$id.pdml";
+#my $pkt_pdml             = "dph$id.pdml";
+my $pkt_pdml             = "dph$id.xml";
 my $pkt_hex_ascii        = "dph$id.hex_ascii.txt";
 my $pkt_text             = "dph$id.text.txt";
 my $pkt_ttrace           = "dph$id.ttrace.txt";
@@ -194,8 +195,8 @@ my $pkt_parcels_directions_file = "$dph_space/$pkt_parcels_directions";
 # URLs
 #
 
-my $pkt_main_dir_url     = "http://$web_server_doc_root/$dph_out_dir/$id/";
-my $pkt_main_html_url    = "http://$web_server_doc_root/$dph_out_dir/$id/$pkt_main_html";
+my $pkt_main_dir_url     = "https://$web_server_doc_root/$dph_out_dir/$id/";
+my $pkt_main_html_url    = "https://$web_server_doc_root/$dph_out_dir/$id/$pkt_main_html";
 
 my $pkt_mail_url         = "./$pkt_mail";
 my $pkt_mail2user_url    = "./$pkt_mail2user";
@@ -219,7 +220,6 @@ my $pkt_log_fh;
 
 # Create the directory and copy necessory files
 system("mkdir -p $dph_space");
-system("mkdir -p $dph_space/win");
 
 system("cp $dph_dat_dir/pdml2html_packet_hex.xsl $dph_space/pdml2html.xsl");
 system("cp $dph_dat_dir/folder.png $dph_space/");
@@ -249,8 +249,8 @@ dph_validations();
 dph_write_to_tshark_data_file("dph_counter", $id);
 
 
-$dph_user_pkt_main_html_url = "http://$web_server/tt/dph/data/$id/$pkt_main_html";
-$dph_user_dph_dir_url       = "http://$web_server/tt/dph/data/$id";
+$dph_user_pkt_main_html_url = "https://$web_server/tt/dph/data/$id/$pkt_main_html";
+$dph_user_dph_dir_url       = "https://$web_server/tt/dph/data/$id";
 
 my $user_input = <STDIN>;
 
@@ -340,7 +340,7 @@ dph_generate_pkt_main_html_file();
 #unlink $pkt_hex_n_ascii_file
 #unlink $pkt_pdml_file;
 #cmn::execute_command("chown root:root $pkt_log_file");
-cmn::execute_command("chmod 600 $pkt_log_file");
+cmn::execute_command("chmod 644 $pkt_log_file");
 
 
 my $background_process="no";
@@ -826,9 +826,7 @@ END_OF_PKT_HTML1
 
     print $html_fh <<END_OF_PKT_HTML7;
     <pre>
-<h4>$id packets decoded</h4>
-Send feedback to: <a href="mailto:dph\@matfallu.in?subject=Decode Packet Hexdump">dph\@matfallu.in</a>
-{Powered by wireshark}
+<b>$id packets decoded</b> {Powered by wireshark}
     </pre>
 
 END_OF_PKT_HTML7
@@ -847,12 +845,9 @@ sub dph_generate_pkt_main_html_file {
     <HEAD>
     <TITLE>Packet Hex Decode Powered by tshark</TITLE>
     </HEAD>
-    <FRAMESET cols="23%, 77%" border="0">
-      <FRAME src="$pkt_html_url">
-      <FRAMESET rows="*,200" border="1">
+    <FRAMESET rows="*,600" border="0">
           <FRAME src="$pkt_pdml_url">
-          <FRAME src="$pkt_hex_ascii_url" frameborder="0">>
-      </FRAMESET>
+          <FRAME src="$pkt_text_url">
     </FRAMESET>
     </HTML>
 END_OF_PKT_MAIN_HTML

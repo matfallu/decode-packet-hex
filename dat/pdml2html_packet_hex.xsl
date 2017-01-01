@@ -129,7 +129,7 @@
   <html>
   <head>
     <title>poor man's Wireshark</title>
-    <script src="http://ajax.googleapis.com/ajax/libs/dojo/1.4/dojo/dojo.xd.js" type="text/javascript"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/dojo/1.10.4/dojo/dojo.js" type="text/javascript"></script>
     <script type="text/javascript">
 function set_node(node, str)
 {
